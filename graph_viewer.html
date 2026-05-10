@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Call Graph Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --panel: #161a22;
+        --fg: #e6e6e6;
+        --muted: #8a93a6;
+        --accent: #6ea8ff;
+        --node: #6ea8ff;
+        --node-class: #ffb86b;
+        --edge: #4a5160;
+        --edge-unresolved: #6b3a3a;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        display: grid;
+        grid-template-columns: 280px 1fr;
+      }
+      aside {
+        background: var(--panel);
+        border-right: 1px solid #222;
+        padding: 14px;
+        overflow: auto;
+      }
+      h1 { font-size: 14px; margin: 0 0 10px; }
+      label { display: block; font-size: 11px; color: var(--muted); margin: 10px 0 4px; }
+      input[type="file"], input[type="text"] {
+        width: 100%; padding: 6px; background: #0b0d12; color: var(--fg);
+        border: 1px solid #2a2f3a; border-radius: 4px; font: inherit;
+      }
+      .stats { margin-top: 12px; font-size: 12px; color: var(--muted); }
+      .stats div { margin: 2px 0; }
+      .legend { margin-top: 14px; font-size: 11px; color: var(--muted); }
+      .legend span.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+      .toggle { display: flex; align-items: center; gap: 6px; margin: 8px 0; }
+      main { position: relative; overflow: hidden; }
+      svg { width: 100%; height: 100%; display: block; cursor: grab; }
+      svg:active { cursor: grabbing; }
+      .node circle { stroke: #0f1115; stroke-width: 1.5px; cursor: pointer; }
+      .node text { fill: var(--fg); font-size: 10px; pointer-events: none; }
+      .link { stroke: var(--edge); stroke-opacity: 0.6; }
+      .link.unresolved { stroke: var(--edge-unresolved); stroke-dasharray: 3 3; }
+      .tooltip {
+        position: absolute; pointer-events: none; background: #1d2230;
+        border: 1px solid #2a2f3a; padding: 6px 8px; border-radius: 4px;
+        font-size: 11px; max-width: 320px; z-index: 10; opacity: 0;
+        transition: opacity 0.1s;
+      }
+      .empty {
+        position: absolute; inset: 0; display: grid; place-items: center;
+        color: var(--muted); font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Call Graph Viewer</h1>
+
+      <label for="file">Load call_graph.json</label>
+      <input type="file" id="file" accept=".json" />
+
+      <label for="filter">Filter nodes (substring)</label>
+      <input type="text" id="filter" placeholder="e.g. Job" />
+
+      <div class="toggle">
+        <input type="checkbox" id="showUnresolved" checked />
+        <label for="showUnresolved" style="margin: 0;">Show unresolved edges</label>
+      </div>
+
+      <div class="legend">
+        <div><span class="dot" style="background: var(--node)"></span>function</div>
+        <div><span class="dot" style="background: var(--node-class)"></span>method (in class)</div>
+        <div><span style="display:inline-block; width:14px; border-top:1.5px solid var(--edge); vertical-align: middle; margin-right: 6px;"></span>resolved call</div>
+        <div><span style="display:inline-block; width:14px; border-top:1.5px dashed var(--edge-unresolved); vertical-align: middle; margin-right: 6px;"></span>unresolved call</div>
+      </div>
+
+      <div class="stats" id="stats"></div>
+    </aside>
+
+    <main>
+      <div class="empty" id="empty">Drop a call_graph.json file to begin</div>
+      <svg id="svg"></svg>
+      <div class="tooltip" id="tooltip"></div>
+    </main>
+
+    <script>
+      const svg = d3.select("#svg");
+      const tooltip = d3.select("#tooltip");
+      const empty = document.getElementById("empty");
+      const fileInput = document.getElementById("file");
+      const filterInput = document.getElementById("filter");
+      const showUnresolved = document.getElementById("showUnresolved");
+      const statsEl = document.getElementById("stats");
+
+      let currentGraph = null;
+      let simulation = null;
+
+      // try fetching the default file (works if served via http; will fail silently on file://)
+      fetch("call_graph.json").then(r => r.ok ? r.json() : null).then(g => g && render(g)).catch(() => {});
+
+      fileInput.addEventListener("change", async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const text = await f.text();
+        render(JSON.parse(text));
+      });
+
+      filterInput.addEventListener("input", () => currentGraph && render(currentGraph));
+      showUnresolved.addEventListener("change", () => currentGraph && render(currentGraph));
+
+      function render(graph) {
+        currentGraph = graph;
+        empty.style.display = "none";
+        svg.selectAll("*").remove();
+
+        const filter = filterInput.value.trim().toLowerCase();
+        const includeUnresolved = showUnresolved.checked;
+
+        // Build node set
+        const nodeMap = new Map();
+        for (const n of graph.nodes) {
+          if (!filter || n.name.toLowerCase().includes(filter)) {
+            nodeMap.set(n.name, { id: n.name, line: n.line, cls: n.class });
+          }
+        }
+
+        // Build edges, including synthetic nodes for unresolved targets
+        const edges = [];
+        for (const e of graph.edges) {
+          const target = e.callee_resolved || (includeUnresolved ? e.callee_raw : null);
+          if (!target) continue;
+          if (!nodeMap.has(e.caller)) continue;
+          if (!nodeMap.has(target)) {
+            if (e.callee_resolved) continue; // resolved target was filtered out
+            nodeMap.set(target, { id: target, external: true });
+          }
+          edges.push({
+            source: e.caller,
+            target,
+            resolved: !!e.callee_resolved,
+          });
+        }
+
+        const nodes = [...nodeMap.values()];
+
+        statsEl.innerHTML = `
+          <div>source: ${escapeHtml(graph.source_file || "")}</div>
+          <div>nodes shown: ${nodes.length} / ${graph.nodes.length}</div>
+          <div>edges shown: ${edges.length} / ${graph.edges.length}</div>
+          <div>resolved (total): ${graph.stats?.num_resolved ?? "?"}</div>
+        `;
+
+        const { width, height } = svg.node().getBoundingClientRect();
+
+        // root group with zoom
+        const g = svg.append("g");
+        svg.call(d3.zoom().scaleExtent([0.2, 4]).on("zoom", (ev) => g.attr("transform", ev.transform)));
+
+        // arrow marker
+        svg.append("defs").append("marker")
+          .attr("id", "arrow")
+          .attr("viewBox", "0 -5 10 10")
+          .attr("refX", 18)
+          .attr("refY", 0)
+          .attr("markerWidth", 6)
+          .attr("markerHeight", 6)
+          .attr("orient", "auto")
+          .append("path")
+          .attr("d", "M0,-5L10,0L0,5")
+          .attr("fill", "#4a5160");
+
+        const link = g.append("g")
+          .selectAll("line")
+          .data(edges)
+          .join("line")
+          .attr("class", d => "link" + (d.resolved ? "" : " unresolved"))
+          .attr("marker-end", "url(#arrow)");
+
+        const node = g.append("g")
+          .selectAll("g")
+          .data(nodes)
+          .join("g")
+          .attr("class", "node")
+          .call(drag());
+
+        node.append("circle")
+          .attr("r", d => d.external ? 4 : (d.cls ? 7 : 6))
+          .attr("fill", d => d.external ? "#444" : (d.cls ? "var(--node-class)" : "var(--node)"));
+
+        node.append("text")
+          .attr("dx", 9)
+          .attr("dy", "0.32em")
+          .text(d => d.id);
+
+        node.on("mouseover", (ev, d) => {
+          const incoming = edges.filter(e => e.target.id === d.id || e.target === d.id).length;
+          const outgoing = edges.filter(e => e.source.id === d.id || e.source === d.id).length;
+          tooltip
+            .style("opacity", 1)
+            .html(`<b>${escapeHtml(d.id)}</b><br>line: ${d.line ?? "—"}<br>in: ${incoming} · out: ${outgoing}${d.external ? "<br><i>external/unresolved</i>" : ""}`);
+        }).on("mousemove", (ev) => {
+          tooltip.style("left", (ev.offsetX + 12) + "px").style("top", (ev.offsetY + 12) + "px");
+        }).on("mouseout", () => tooltip.style("opacity", 0));
+
+        simulation = d3.forceSimulation(nodes)
+          .force("link", d3.forceLink(edges).id(d => d.id).distance(70))
+          .force("charge", d3.forceManyBody().strength(-220))
+          .force("center", d3.forceCenter(width / 2, height / 2))
+          .force("collide", d3.forceCollide().radius(20))
+          .on("tick", () => {
+            link
+              .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+              .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+            node.attr("transform", d => `translate(${d.x},${d.y})`);
+          });
+      }
+
+      function drag() {
+        return d3.drag()
+          .on("start", (ev, d) => {
+            if (!ev.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x; d.fy = d.y;
+          })
+          .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+          .on("end", (ev, d) => {
+            if (!ev.active) simulation.alphaTarget(0);
+            d.fx = null; d.fy = null;
+          });
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      }
+    </script>
+  </body>
+</html>
