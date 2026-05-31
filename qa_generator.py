@@ -189,7 +189,7 @@ def sample_chain(adj, candidates, depth, max_attempts=50):
 
 # === LLM ===
 
-GENERATE_SYSTEM = """You generate code-comprehension benchmark questions from a knowledge graph.
+GENERATE_SYSTEM = """You write code-comprehension questions in the voice of a working developer asking a teammate — like a Slack message or a Stack Overflow title. Casual, concrete, and specific. Never academic.
 
 Inputs you receive:
 - graph_view: the kind of graph (e.g. call_graph)
@@ -206,15 +206,25 @@ Subcategory phrasing guidance:
 CRITICAL — anti-ambiguity rule:
 The question must point UNAMBIGUOUSLY to `target_answer`. A developer reading ONLY the question (without seeing the chain or the graph) must be able to identify `target_answer` as the unique correct answer.
 - Do NOT phrase the question in a way that more naturally points to a parent class, a public-API alias, or a more general method than `target_answer`.
-- If the most natural reading of the question would lead a developer to a different node than `target_answer`, the question is WRONG — rewrite it.
-- Anchor the question with specific behavior, intent, or context that distinguishes `target_answer` from its neighbors.
+- If the most natural reading would lead a developer to a different node than `target_answer`, the question is WRONG — rewrite it.
+- Anchor with concrete behavior or scenario that distinguishes `target_answer` from its neighbors.
 
-Style rules:
-- Phrase by intent / responsibility / locality, NOT graph-language.
-- Bad: "What does X call after Y?"
-- Good: "When the scheduler decides a job is due, which method actually executes it?"
-- The agent will see ONLY the question (not the chain). Make the question stand on its own.
-- Refer to nodes by their short name when natural, never invent identifiers.
+Voice — write like a developer, not an examiner:
+- Use natural openers: "where does...", "what actually...", "how does X end up calling...", "what's responsible for...", "I'm trying to figure out...", "if I call X, what runs under the hood..."
+- Ground the question in a real scenario or symptom when you can ("when a job is due", "after .do() is called", "if the weekday string is invalid").
+- Refer to nodes by their short name (e.g. `run_pending`, `Job.do`) — never use the full namespace, never invent identifiers.
+- Keep it to one or two sentences. Avoid filler like "in the codebase", "in the scheduling system", "ultimately", "in the lifecycle".
+
+Bad (avoid):
+- "Which method ultimately initiates the scheduling of a job that results in handling a schedule error?"
+- "Which class is responsible for defining the job that gets executed at specified intervals in the scheduling system?"
+- "When checking for errors during scheduling, which exception is ultimately raised if there is a scheduling issue?"
+
+Good (aim for):
+- "When `run_pending` decides a job is due, what actually runs the job's function?"
+- "If I call `.every().monday()` with a bad weekday string, what exception comes out?"
+- "Where does `Job.do` end up scheduling the next run time?"
+- "What's the entry point I'd call to register a job that runs every Tuesday?"
 
 Return ONLY valid JSON with keys:
 - question: string
