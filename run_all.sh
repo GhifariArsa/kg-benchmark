@@ -18,8 +18,30 @@ RUNS_DIR="${RUNS_DIR:-qa_output}"
 AGENT="${AGENT:-opencode}"
 TIMEOUT="${TIMEOUT:-300}"
 
-mkdir -p "$GRAPH_DIR" "$BANK_DIR" "$RUNS_DIR"
+mkdir -p "$GRAPH_DIR" "$BANK_DIR" "$RUNS_DIR" "$REPOS_DIR"
 
+echo "=== Stage 0: clone benchmark repos (skip if present) ==="
+REPOS=(
+  "schedule    https://github.com/dbader/schedule.git"
+  "tenacity    https://github.com/jd/tenacity.git"
+  "loguru      https://github.com/Delgan/loguru.git"
+  "typer       https://github.com/fastapi/typer.git"
+  "httpx       https://github.com/encode/httpx.git"
+  "requests    https://github.com/psf/requests.git"
+  "instructor  https://github.com/instructor-ai/instructor.git"
+)
+for entry in "${REPOS[@]}"; do
+  read -r name url <<< "$entry"
+  dest="$REPOS_DIR/$name"
+  if [[ -d "$dest/.git" ]]; then
+    echo "⊘ $name: already cloned"
+  else
+    echo "▶ cloning $name"
+    git clone --depth 1 "$url" "$dest"
+  fi
+done
+
+echo
 echo "=== Stage 1: extract call graphs ==="
 uv run python kg_extractor_v2.py "$REPOS_DIR" --batch --output-dir "$GRAPH_DIR"
 
