@@ -63,7 +63,7 @@ AGENTS = {
         "cmd": [
             "opencode", "run",
             "--format", "json",
-            "--model", "nectar/qwen3.6:35b-a3b",
+            "--model", "ollama/qwen3.6:35b-a3b",
             "--agent", "question-and-answer-no-mcp",
         ],
         "parse": _parse_opencode_json,
@@ -136,7 +136,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run a question bank through CLI coding agents.")
     parser.add_argument("question_bank")
     parser.add_argument("--repo-dir", required=True)
-    parser.add_argument("--agents", nargs="+", default=["claude-code"], choices=list(AGENTS))
+    parser.add_argument("--agents", nargs="+", default=["opencode"], choices=list(AGENTS))
     parser.add_argument("-o", "--output", default="qa_output/agent_runs.json")
     parser.add_argument("-n", "--limit", type=int, default=None)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_S)
