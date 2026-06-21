@@ -18,7 +18,7 @@ from collections import defaultdict
 
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")
+client = OpenAI()
 
 
 # === Configuration ===
@@ -49,7 +49,7 @@ DEPTH_PROFILES = {
     6: {1: 0.10, 2: 0.25, 3: 0.25, 4: 0.20, 5: 0.12, 6: 0.08},
 }
 
-MODEL = "qwen3.6"
+MODEL = "gpt-4o-mini"
 ACCEPTED_HOP_LIMIT = 2  # accepted_answers must be within N undirected hops of canonical
 LOCAL_SUBGRAPH_HOPS = 2
 
@@ -422,7 +422,9 @@ def main():
     parser.add_argument("graph_path", help="Path to graph JSON")
     parser.add_argument("-n", "--num-questions", type=int, default=50)
     parser.add_argument("--graph-view", default="call_graph")
-    parser.add_argument("--max-depth", type=int, default=4, choices=sorted(DEPTH_PROFILES))
+    parser.add_argument(
+        "--max-depth", type=int, default=4, choices=sorted(DEPTH_PROFILES)
+    )
     parser.add_argument("-o", "--output", default="qa_output/question_bank.json")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()

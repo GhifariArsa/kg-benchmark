@@ -25,6 +25,31 @@ def _parse_claude_code_json(stdout):
         return stdout
 
 
+def _parse_opencode_json(stdout):
+    """Walk opencode's `--format json` NDJSON event stream and concatenate
+    any assistant-text payloads. Falls back to raw stdout if nothing parses."""
+    pieces = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        for key in ("text", "content", "delta", "message"):
+            v = ev.get(key)
+            if isinstance(v, str):
+                pieces.append(v)
+                break
+            if isinstance(v, dict):
+                inner = v.get("content") or v.get("text")
+                if isinstance(inner, str):
+                    pieces.append(inner)
+                    break
+    return "\n".join(pieces).strip() or stdout.strip()
+
+
 AGENTS = {
     "claude-code": {
         "cmd": ["claude", "-p", "--output-format", "json"],
@@ -37,10 +62,11 @@ AGENTS = {
     "opencode": {
         "cmd": [
             "opencode", "run",
+            "--format", "json",
             "--model", "nectar/qwen3.6:35b-a3b",
             "--agent", "question-and-answer-no-mcp",
         ],
-        "parse": str.strip,
+        "parse": _parse_opencode_json,
     },
 }
 
